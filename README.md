@@ -33,6 +33,611 @@ FCM Receiver is a robust Python library that implements low-level Firebase Cloud
 
 ---
 
+## 🚀 Multi-Project Management with MultiFCMClient
+
+`MultiFCMClient` is a powerful wrapper class that simplifies managing multiple Firebase projects simultaneously. It handles credential management, thread pooling, and callback routing automatically.
+
+### ✨ MultiFCMClient Features
+
+- 🎯 **Multi-Project Support** - Manage multiple Firebase projects in one instance
+- 🔧 **Automatic Credential Management** - Load/save credentials per project
+- 🧵 **Thread Pool Optimization** - Efficient concurrent connection handling
+- 📊 **Centralized Callbacks** - Single callback handler for all projects
+- 💾 **Persistent Storage** - Automatic credential persistence
+- 🔄 **Auto-Reconnection** - Per-project reconnection with backoff
+- 🏷️ **Project Identification** - All callbacks include project_id
+
+### 🚀 Basic MultiFCMClient Usage
+
+```python
+from fcm_receiver import MultiFCMClient
+import time
+
+# Define multiple Firebase projects
+projects = [
+    {
+        "project_id": "shopee-ad86f",
+        "api_key": "AIzaSyAPkv8NbRwcRTkNQK-xXJ1Za_IN2sPIYCg",
+        "app_id": "1:808332928752:android:24633eecd863d5bd828435",
+        "topics": ["orders", "promotions"]
+    },
+    {
+        "project_id": "belajarfirebase-395f8", 
+        "api_key": "AIzaSyBTzZdhl5TzFlggYx6bNEn-TxYVp5MUKNQ",
+        "app_id": "1:468081959538:android:9c4b4135f08773f50498eb",
+        "topics": ["news", "updates"]
+    },
+    {
+        "project_id": "authexample-ffdf9",
+        "api_key": "AIzaSyC23PJFvsGcPV-mxk-OOc0d3o9uCuiVZX4", 
+        "app_id": "1:640680687175:android:8df68c2a7a979c1c",
+        "topics": ["announcements"]
+    }
+]
+
+# Create MultiFCMClient
+multi_client = MultiFCMClient(
+    projects=projects,
+    credential_dir="./credentials",
+    heartbeat_interval_sec=60
+)
+
+# Set up centralized callbacks
+def on_notification(message: dict, project_id: str):
+    print(f"🔔 [{project_id}] {message.get('payload', {}).get('title', 'No title')}")
+
+def on_data(data: bytes, project_id: str):
+    print(f"📨 [{project_id}] Raw data: {len(data)} bytes")
+
+def on_status(status: str, project_id: str):
+    print(f"📡 [{project_id}] Status: {status}")
+
+def on_tag(tag: int, name: str, project_id: str):
+    print(f"🏷️ [{project_id}] Tag: {tag} ({name})")
+
+# Assign callbacks
+multi_client.on_notification_message = on_notification
+multi_client.on_data_message = on_data
+multi_client.on_connection_status = on_status
+multi_client.on_tag = on_tag
+
+# Start all clients
+print("🚀 Starting multi-project FCM receiver...")
+multi_client.start()
+
+# Keep running
+try:
+    while True:
+        time.sleep(3600)
+except KeyboardInterrupt:
+    print("\n🛑 Shutting down...")
+    multi_client.close()
+```
+
+### 🎯 Advanced MultiFCMClient Configuration
+
+```python
+from fcm_receiver import MultiFCMClient
+import json
+import logging
+from pathlib import Path
+
+class AdvancedMultiFCMManager:
+    """Advanced multi-project FCM manager with enhanced features"""
+    
+    def __init__(self, config_file: str = "fcm_config.json"):
+        self.config_file = config_file
+        self.multi_client = None
+        self.logger = self._setup_logger()
+        
+    def _setup_logger(self):
+        logger = logging.getLogger("MultiFCMManager")
+        logger.setLevel(logging.INFO)
+        
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        
+        return logger
+    
+    def load_config(self) -> dict:
+        """Load configuration from JSON file"""
+        try:
+            with open(self.config_file, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            self.logger.error(f"Config file {self.config_file} not found")
+            return {}
+    
+    def setup_message_handlers(self):
+        """Setup comprehensive message handlers"""
+        
+        def handle_notification(message: dict, project_id: str):
+            """Handle notification messages with project-specific logic"""
+            payload = message.get('payload', {})
+            title = payload.get('title', 'No Title')
+            body = payload.get('body', '')
+            
+            self.logger.info(f"🔔 [{project_id}] {title}")
+            
+            # Project-specific handling
+            if project_id == "shopee-ad86f":
+                self._handle_shopee_notification(payload)
+            elif project_id == "belajarfirebase-395f8":
+                self._handle_news_notification(payload)
+            elif project_id == "authexample-ffdf9":
+                self._handle_auth_notification(payload)
+        
+        def handle_data(data: bytes, project_id: str):
+            """Handle raw data messages"""
+            try:
+                text = data.decode('utf-8')
+                self.logger.info(f"📨 [{project_id}] Data: {text[:100]}...")
+                
+                # Process business logic
+                self._process_business_data(project_id, data)
+                
+            except UnicodeDecodeError:
+                self.logger.warning(f"📦 [{project_id}] Binary data: {len(data)} bytes")
+        
+        def handle_connection_status(status: str, project_id: str):
+            """Handle connection status changes"""
+            status_emoji = {
+                "connecting": "🔄",
+                "connected": "✅", 
+                "disconnected": "❌",
+                "reconnecting": "🔄",
+                "error": "⚠️"
+            }
+            
+            emoji = status_emoji.get(status, "📡")
+            self.logger.info(f"{emoji} [{project_id}] {status}")
+            
+            # Trigger alerts for critical status
+            if status == "error":
+                self._send_alert(f"FCM connection error for {project_id}")
+        
+        def handle_protocol_tag(tag: int, name: str, project_id: str):
+            """Handle FCM protocol tags"""
+            tag_info = {
+                0: "HEARTBEAT_PING",
+                1: "HEARTBEAT_ACK", 
+                2: "LOGIN_REQUEST",
+                3: "LOGIN_RESPONSE",
+                8: "DATA_MESSAGE_STANZA"
+            }
+            
+            tag_name = tag_info.get(tag, f"UNKNOWN_{tag}")
+            self.logger.debug(f"🏷️ [{project_id}] {tag_name} ({tag})")
+        
+        # Register handlers
+        self.multi_client.on_notification_message = handle_notification
+        self.multi_client.on_data_message = handle_data
+        self.multi_client.on_connection_status = handle_connection_status
+        self.multi_client.on_tag = handle_protocol_tag
+    
+    def _handle_shopee_notification(self, payload: dict):
+        """Handle Shopee-specific notifications"""
+        if 'order_id' in payload:
+            self.logger.info(f"🛒 New order: {payload['order_id']}")
+            # Trigger order processing workflow
+        elif 'promotion' in payload:
+            self.logger.info(f"🎉 Promotion: {payload['promotion']}")
+    
+    def _handle_news_notification(self, payload: dict):
+        """Handle news notifications"""
+        category = payload.get('category', 'general')
+        self.logger.info(f"📰 [{category}] {payload.get('title', 'News')}")
+    
+    def _handle_auth_notification(self, payload: dict):
+        """Handle authentication notifications"""
+        event = payload.get('event', 'auth_event')
+        self.logger.info(f"🔐 Auth event: {event}")
+    
+    def _process_business_data(self, project_id: str, data: bytes):
+        """Process business-specific data"""
+        # Implement your business logic here
+        # Examples:
+        # - Store in database
+        # - Forward to other services
+        # - Trigger workflows
+        # - Update caches
+        pass
+    
+    def _send_alert(self, message: str):
+        """Send alert (implement your alerting system)"""
+        # Examples:
+        # - Send email
+        # - Post to Slack
+        # - Create ticket
+        # - Send SMS
+        self.logger.warning(f"🚨 ALERT: {message}")
+    
+    def start(self):
+        """Start the multi-client manager"""
+        config = self.load_config()
+        
+        if not config or 'projects' not in config:
+            raise ValueError("Invalid configuration file")
+        
+        # Create MultiFCMClient with advanced settings
+        self.multi_client = MultiFCMClient(
+            projects=config['projects'],
+            credential_dir=config.get('credential_dir', './credentials'),
+            heartbeat_interval_sec=config.get('heartbeat_interval', 60),
+            max_workers=config.get('max_workers', None)
+        )
+        
+        # Setup message handlers
+        self.setup_message_handlers()
+        
+        # Start all clients
+        self.logger.info(f"🚀 Starting {len(config['projects'])} FCM projects...")
+        self.multi_client.start()
+        
+        self.logger.info("✅ Multi-project FCM manager started successfully!")
+    
+    def stop(self):
+        """Stop all clients gracefully"""
+        if self.multi_client:
+            self.logger.info("🛑 Stopping multi-project FCM manager...")
+            self.multi_client.close()
+            self.logger.info("✅ All clients stopped")
+
+# Example configuration file (fcm_config.json)
+"""
+{
+  "projects": [
+    {
+      "project_id": "shopee-ad86f",
+      "api_key": "AIzaSyAPkv8NbRwcRTkNQK-xXJ1Za_IN2sPIYCg",
+      "app_id": "1:808332928752:android:24633eecd863d5bd828435",
+      "topics": ["orders", "promotions", "shipping"]
+    },
+    {
+      "project_id": "belajarfirebase-395f8",
+      "api_key": "AIzaSyBTzZdhl5TzFlggYx6bNEn-TxYVp5MUKNQ", 
+      "app_id": "1:468081959538:android:9c4b4135f08773f50498eb",
+      "topics": ["news", "updates", "alerts"]
+    },
+    {
+      "project_id": "authexample-ffdf9",
+      "api_key": "AIzaSyC23PJFvsGcPV-mxk-OOc0d3o9uCuiVZX4",
+      "app_id": "1:640680687175:android:8df68c2a7a979c1c", 
+      "topics": ["auth", "security", "notifications"]
+    }
+  ],
+  "credential_dir": "./fcm_credentials",
+  "heartbeat_interval": 60,
+  "max_workers": 10
+}
+"""
+
+# Usage
+if __name__ == "__main__":
+    manager = AdvancedMultiFCMManager("fcm_config.json")
+    
+    try:
+        manager.start()
+        
+        # Keep running
+        import time
+        while True:
+            time.sleep(3600)
+            
+    except KeyboardInterrupt:
+        manager.stop()
+```
+
+### 🏗️ Production-Grade MultiFCMClient Setup
+
+```python
+from fcm_receiver import MultiFCMClient
+import json
+import os
+import signal
+import sys
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any
+
+class ProductionMultiFCMService:
+    """Production-ready multi-project FCM service"""
+    
+    def __init__(self, config_path: str = "/etc/fcm/config.json"):
+        self.config_path = config_path
+        self.multi_client = None
+        self.running = False
+        self.stats = {
+            'start_time': None,
+            'messages_received': 0,
+            'connections': 0,
+            'errors': 0
+        }
+        
+        # Setup signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals"""
+        print(f"\n🛑 Received signal {signum}, shutting down...")
+        self.running = False
+        self.stop()
+    
+    def load_configuration(self) -> Dict[str, Any]:
+        """Load and validate configuration"""
+        try:
+            with open(self.config_path, 'r') as f:
+                config = json.load(f)
+            
+            # Validate configuration
+            required_fields = ['projects', 'credential_dir']
+            for field in required_fields:
+                if field not in config:
+                    raise ValueError(f"Missing required field: {field}")
+            
+            # Validate each project
+            for project in config['projects']:
+                required_project_fields = ['project_id', 'api_key', 'app_id']
+                for field in required_project_fields:
+                    if field not in project:
+                        raise ValueError(f"Project missing {field}: {project}")
+            
+            return config
+            
+        except Exception as e:
+            print(f"❌ Configuration error: {e}")
+            sys.exit(1)
+    
+    def setup_logging(self, config: Dict[str, Any]):
+        """Setup comprehensive logging"""
+        log_dir = Path(config.get('log_dir', '/var/log/fcm'))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        log_file = log_dir / f"fcm_{datetime.now().strftime('%Y%m%d')}.log"
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()
+            ]
+        )
+        
+        return logging.getLogger('ProductionFCM')
+    
+    def setup_metrics(self, config: Dict[str, Any]):
+        """Setup metrics collection (optional)"""
+        # This is a placeholder for metrics integration
+        # You could integrate with:
+        # - Prometheus
+        # - StatsD  
+        # - Custom metrics system
+        
+        metrics_enabled = config.get('metrics_enabled', False)
+        if metrics_enabled:
+            # Setup your metrics collector here
+            pass
+    
+    def setup_health_check(self, config: Dict[str, Any]):
+        """Setup health check endpoint"""
+        health_port = config.get('health_check_port', 8080)
+        
+        # This is a placeholder for health check endpoint
+        # You could use Flask, FastAPI, or other web frameworks
+        
+        if health_port:
+            print(f"🩺 Health check would be available on port {health_port}")
+    
+    def start(self):
+        """Start the production FCM service"""
+        print("🚀 Starting Production Multi-Project FCM Service...")
+        
+        # Load configuration
+        config = self.load_configuration()
+        
+        # Setup logging
+        logger = self.setup_logging(config)
+        
+        # Setup metrics
+        self.setup_metrics(config)
+        
+        # Setup health check
+        self.setup_health_check(config)
+        
+        # Create MultiFCMClient
+        self.multi_client = MultiFCMClient(
+            projects=config['projects'],
+            credential_dir=config['credential_dir'],
+            heartbeat_interval_sec=config.get('heartbeat_interval', 60),
+            max_workers=config.get('max_workers')
+        )
+        
+        # Setup message handlers
+        self.setup_message_handlers(logger, config)
+        
+        # Ensure credential directory exists
+        Path(config['credential_dir']).mkdir(parents=True, exist_ok=True)
+        
+        # Start clients
+        logger.info(f"Starting {len(config['projects'])} FCM projects...")
+        self.multi_client.start()
+        
+        self.running = True
+        self.stats['start_time'] = datetime.now()
+        self.stats['connections'] = len(self.multi_client.clients)
+        
+        logger.info("✅ Production FCM service started successfully!")
+        logger.info(f"Managing {len(config['projects'])} projects")
+        logger.info(f"Credentials stored in: {config['credential_dir']}")
+        
+        # Main loop
+        try:
+            while self.running:
+                self._log_stats(logger)
+                import time
+                time.sleep(60)  # Stats interval
+                
+        except Exception as e:
+            logger.error(f"Service error: {e}")
+        finally:
+            self.stop()
+    
+    def setup_message_handlers(self, logger, config: Dict[str, Any]):
+        """Setup production message handlers"""
+        
+        def handle_notification(message: dict, project_id: str):
+            """Handle notification messages"""
+            self.stats['messages_received'] += 1
+            
+            payload = message.get('payload', {})
+            title = payload.get('title', 'No Title')
+            
+            logger.info(f"🔔 [{project_id}] {title}")
+            
+            # Implement your business logic here
+            self.process_notification(project_id, payload, config)
+        
+        def handle_data(data: bytes, project_id: str):
+            """Handle data messages"""
+            self.stats['messages_received'] += 1
+            
+            try:
+                text = data.decode('utf-8')
+                logger.info(f"📨 [{project_id}] Data message: {len(data)} bytes")
+                self.process_data(project_id, data, config)
+            except UnicodeDecodeError:
+                logger.info(f"📦 [{project_id}] Binary data: {len(data)} bytes")
+        
+        def handle_status(status: str, project_id: str):
+            """Handle connection status"""
+            logger.info(f"📡 [{project_id}] Status: {status}")
+        
+        def handle_error(error: Exception, project_id: str):
+            """Handle errors"""
+            self.stats['errors'] += 1
+            logger.error(f"❌ [{project_id}] Error: {error}")
+        
+        # Register handlers
+        self.multi_client.on_notification_message = handle_notification
+        self.multi_client.on_data_message = handle_data
+        self.multi_client.on_connection_status = handle_status
+        # Note: You might need to extend MultiFCMClient to support error callbacks
+    
+    def process_notification(self, project_id: str, payload: dict, config: Dict[str, Any]):
+        """Process notification based on project type"""
+        # Implement your business logic here
+        # This could forward to webhooks, store in database, etc.
+        pass
+    
+    def process_data(self, project_id: str, data: bytes, config: Dict[str, Any]):
+        """Process data messages"""
+        # Implement your data processing logic
+        pass
+    
+    def _log_stats(self, logger):
+        """Log service statistics"""
+        if self.stats['start_time']:
+            uptime = datetime.now() - self.stats['start_time']
+            logger.info(f"📊 Stats - Uptime: {uptime}, Messages: {self.stats['messages_received']}, Errors: {self.stats['errors']}")
+    
+    def stop(self):
+        """Stop the service gracefully"""
+        if self.multi_client:
+            print("🛑 Stopping FCM service...")
+            self.multi_client.close()
+            print("✅ FCM service stopped")
+
+# Systemd service example (/etc/systemd/system/fcm-receiver.service)
+"""
+[Unit]
+Description=FCM Multi-Project Receiver Service
+After=network.target
+
+[Service]
+Type=simple
+User=fcm
+Group=fcm
+WorkingDirectory=/opt/fcm-receiver
+ExecStart=/opt/fcm-receiver/venv/bin/python /opt/fcm-receiver/production_service.py
+Restart=always
+RestartSec=10
+Environment=PYTHONPATH=/opt/fcm-receiver
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+if __name__ == "__main__":
+    service = ProductionMultiFCMService()
+    service.start()
+```
+
+### 🔧 MultiFCMClient API Reference
+
+#### Constructor
+
+```python
+MultiFCMClient(
+    projects: List[dict],           # List of project configurations
+    credential_dir: str = ".",       # Directory for credential storage
+    heartbeat_interval_sec: int = 60, # Heartbeat interval
+    max_workers: int = None          # Thread pool size (auto-calculated)
+)
+```
+
+#### Configuration Format
+
+```python
+projects = [
+    {
+        "project_id": "your-project-id",     # Required
+        "api_key": "your-api-key",           # Required  
+        "app_id": "your-app-id",             # Required
+        "topics": ["topic1", "topic2"]        # Optional
+    }
+]
+```
+
+#### Callback Methods
+
+```python
+# Notification messages (decrypted JSON)
+multi_client.on_notification_message = callable(message: dict, project_id: str)
+
+# Raw data messages (bytes)
+multi_client.on_data_message = callable(data: bytes, project_id: str)
+
+# Raw protocol messages
+multi_client.on_raw_message = callable(obj: object, project_id: str)
+
+# Connection status changes
+multi_client.on_connection_status = callable(status: str, project_id: str)
+
+# Protocol tags
+multi_client.on_tag = callable(tag: int, name: str, project_id: str)
+```
+
+#### Control Methods
+
+```python
+# Start all clients
+multi_client.start()
+
+# Stop all clients  
+multi_client.close()
+
+# Access individual clients
+clients = multi_client.clients  # Dict[str, FCMClient]
+```
+
+---
+
 ## 📦 Installation
 
 ### From PyPI (Recommended)
