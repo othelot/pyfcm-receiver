@@ -48,6 +48,7 @@ class FCMClient:
         self.api_key: str = ""
         self.app_id: str = ""
         self.project_id: str = ""
+        self.client_id: Optional[str] = None
         self.gcm_token: str = ""
         self.fcm_token: str = ""
         self.android_id: int = 0
@@ -61,8 +62,8 @@ class FCMClient:
         # This is required for the current web registration path to obtain an FCM token.
         # Set to False only if you already have tokens persisted and just want to listen.
         self.require_gcm_token: bool = True
-        self.on_data_message: Optional[Callable[[bytes], None]] = None
-        self.on_raw_message: Optional[Callable[[object], None]] = None
+        self.on_data_message: Optional[Callable[[bytes, str], None]] = None
+        self.on_raw_message: Optional[Callable[[object, str], None]] = None
         self.on_notification_message: Optional[Callable[[dict, str], None]] = None
         self.on_connection_status: Optional[Callable[[str, str], None]] = None
         self.on_tag: Optional[Callable[[int, str, str], None]] = None
@@ -298,6 +299,8 @@ class FCMClient:
             self.persistent_ids.append(pid)
             # TTL cleanup could be implemented with a timer if desired
 
+        identifier = self.client_id or self.project_id or ""
+
         # Extract encryption parameters if present
         crypto_key = None
         encryption = None
@@ -331,19 +334,19 @@ class FCMClient:
                             "payload": obj,
                             "persistentId": getattr(message, "persistent_id", None),
                         }
-                        self.on_notification_message(wrapped, self.project_id)
+                        self.on_notification_message(wrapped, identifier)
                         sent_json = True
                     except Exception:
                         sent_json = False
                 if not sent_json and self.on_data_message:
-                    self.on_data_message(pt, self.project_id)
+                    self.on_data_message(pt, identifier)
                 return
             except Exception as e:
                 # Fall through to raw handler on decryption failure
                 print(f"[fcm_client] decryption failed: {e}")
 
         if self.on_raw_message:
-            self.on_raw_message(message, self.project_id)
+            self.on_raw_message(message, identifier)
 
     def _on_socket_close(self, _err: Optional[Exception]) -> None:
         # Trigger auto-reconnect with backoff
@@ -382,14 +385,16 @@ class FCMClient:
     def _set_status(self, s: str) -> None:
         if self.on_connection_status:
             try:
-                self.on_connection_status(s, self.project_id)
+                identifier = self.client_id or self.project_id or ""
+                self.on_connection_status(s, identifier)
             except Exception:
                 pass
 
     def _on_tag_internal(self, tag: int, name: str) -> None:
         if self.on_tag:
             try:
-                self.on_tag(tag, name, self.project_id)
+                identifier = self.client_id or self.project_id or ""
+                self.on_tag(tag, name, identifier)
             except Exception:
                 pass
 
@@ -397,7 +402,7 @@ class FCMClient:
 class MultiFCMClient:
     """
     Manage multiple FCMClient instances (one per Firebase project),
-    start listening concurrently, and proxy callbacks with project_id.
+    start listening concurrently, and proxy callbacks with the provided id.
     """
 
     def __init__(
@@ -407,6 +412,16 @@ class MultiFCMClient:
         heartbeat_interval_sec: int = 60,
         max_workers: Optional[int] = None,
     ) -> None:
+        if not isinstance(projects, list):
+            raise ValueError("projects must be provided as a list of dicts")
+        for idx, cfg in enumerate(projects):
+            if not isinstance(cfg, dict):
+                raise ValueError(f"project config at index {idx} must be a dict")
+            if "id" not in cfg:
+                raise ValueError(f"project config at index {idx} missing required 'id'")
+            if cfg["id"] in (None, ""):
+                raise ValueError(f"project config at index {idx} has empty 'id'")
+            cfg["id"] = str(cfg["id"])
         self.projects = projects
         self.credential_dir = credential_dir
         self.heartbeat_interval_sec = heartbeat_interval_sec
@@ -458,42 +473,43 @@ class MultiFCMClient:
         p.write_text(json.dumps(cred, indent=2), encoding="utf-8")
 
     # Proxies to propagate to multi-level callbacks
-    def _proxy_notif(self, obj: dict, project_id: str):
+    def _proxy_notif(self, obj: dict, identifier: str):
         if self.on_notification_message:
             try:
-                self.on_notification_message(obj, project_id)
+                self.on_notification_message(obj, identifier)
             except Exception:
                 pass
 
-    def _proxy_data(self, b: bytes, project_id: str):
+    def _proxy_data(self, b: bytes, identifier: str):
         if self.on_data_message:
             try:
-                self.on_data_message(b, project_id)
+                self.on_data_message(b, identifier)
             except Exception:
                 pass
 
-    def _proxy_raw(self, o: object, project_id: str):
+    def _proxy_raw(self, o: object, identifier: str):
         if self.on_raw_message:
             try:
-                self.on_raw_message(o, project_id)
+                self.on_raw_message(o, identifier)
             except Exception:
                 pass
 
-    def _proxy_status(self, s: str, project_id: str):
+    def _proxy_status(self, s: str, identifier: str):
         if self.on_connection_status:
             try:
-                self.on_connection_status(s, project_id)
+                self.on_connection_status(s, identifier)
             except Exception:
                 pass
 
-    def _proxy_tag(self, tag: int, name: str, project_id: str):
+    def _proxy_tag(self, tag: int, name: str, identifier: str):
         if self.on_tag:
             try:
-                self.on_tag(tag, name, project_id)
+                self.on_tag(tag, name, identifier)
             except Exception:
                 pass
 
     def _prepare_and_start_single(self, cfg: dict) -> Tuple[str, Optional[FCMClient]]:
+        identifier = cfg["id"]
         project_id = cfg["project_id"]
         try:
             api_key = cfg["api_key"]
@@ -503,6 +519,7 @@ class MultiFCMClient:
             client.api_key = api_key
             client.app_id = app_id
             client.project_id = project_id
+            client.client_id = identifier
             client.heartbeat_interval_sec = self.heartbeat_interval_sec
 
             # Wire proxies
@@ -540,10 +557,10 @@ class MultiFCMClient:
 
             # Start listening (each client forks worker threads internally)
             client.start_listening()
-            return project_id, client
+            return identifier, client
         except Exception as e:
-            print(f"[multi_fcm] failed to start project {project_id}: {e}")
-            return project_id, None
+            print(f"[multi_fcm] failed to start project {project_id} (id={identifier}): {e}")
+            return identifier, None
 
     def start(self) -> None:
         """Create/load all clients and start listening concurrently using a thread pool."""
@@ -552,11 +569,11 @@ class MultiFCMClient:
         with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
             futures = [ex.submit(self._prepare_and_start_single, cfg) for cfg in self.projects]
             for fut in as_completed(futures):
-                project_id, client = fut.result()
+                identifier, client = fut.result()
                 if client is None:
                     continue
                 with self._lock:
-                    self.clients[project_id] = client
+                    self.clients[identifier] = client
 
     def close(self) -> None:
         for c in list(self.clients.values()):
