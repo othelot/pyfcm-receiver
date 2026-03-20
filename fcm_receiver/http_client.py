@@ -122,7 +122,7 @@ def send_gcm_register_request(
     return token
 
 
-def send_fcm_install_request(api_key: str, project_id: str, app_id: str, android: bool = False) -> str:
+def send_fcm_install_request(api_key: str, project_id: str, app_id: str, android: bool = False) -> Tuple[str, str]:
     # Generate a valid FID (17 bytes) with high nibble 0b0111, then base64-std
     import os
 
@@ -164,7 +164,7 @@ def send_fcm_install_request(api_key: str, project_id: str, app_id: str, android
     token = result.get("authToken", {}).get("token")
     if not token:
         raise RuntimeError("failed to obtain installation auth token")
-    return token
+    return fid, token
 
 
 def send_fcm_register_request(

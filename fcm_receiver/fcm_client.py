@@ -51,6 +51,7 @@ class FCMClient:
         self.client_id: Optional[str] = None
         self.gcm_token: str = ""
         self.fcm_token: str = ""
+        self.fid: str = ""
         self.android_id: int = 0
         self.security_token: int = 0
         self.private_key = None
@@ -92,7 +93,7 @@ class FCMClient:
         self.auth_secret = base64.b64decode(auth_secret_base64)
 
     # Registration flow (for new device)
-    def register(self) -> Tuple[str, str, int, int]:
+    def register(self) -> Tuple[str, str, int, int, str]:
         if not (self.app_id and self.project_id and self.api_key):
             raise RuntimeError("FCMClient requires AppId, ProjectID, ApiKey")
 
@@ -133,8 +134,8 @@ class FCMClient:
                 print("[fcm_client] skipping FCM register (no gcm token, require_gcm_token=False)")
             else:
                 # installation auth token
-                installation_token = send_fcm_install_request(self.api_key, self.project_id, self.app_id, android=False)
-                print("[fcm_client] installation token obtained")
+                self.fid, installation_token = send_fcm_install_request(self.api_key, self.project_id, self.app_id, android=False)
+                print(f"[fcm_client] fid={self.fid}, installation token obtained")
 
                 # register to get FCM token
                 pub_bytes = public_key_bytes_uncompressed(self.public_key)
@@ -149,7 +150,7 @@ class FCMClient:
                     installation_auth_token=installation_token,
                 )
                 print(f"[fcm_client] fcm token: {self.fcm_token}")
-        return self.fcm_token, self.gcm_token, self.android_id, self.security_token
+        return self.fcm_token, self.gcm_token, self.android_id, self.security_token, self.fid
 
     # Topic operations
     @staticmethod
@@ -535,17 +536,19 @@ class MultiFCMClient:
             if cred:
                 client.gcm_token = cred.get("gcmToken", "")
                 client.fcm_token = cred.get("fcmToken", "")
+                client.fid = cred.get("fid", "")
                 client.android_id = int(cred["androidId"]) or 0
                 client.security_token = int(cred["securityToken"]) or 0
                 client.load_keys(cred["privateKeyBase64"], cred["authSecretBase64"])
             else:
                 priv_b64, auth_b64 = client.create_new_keys()
                 client.load_keys(priv_b64, auth_b64)
-                fcm_token, gcm_token, android_id, security_token = client.register()
+                fcm_token, gcm_token, android_id, security_token, fid = client.register()
                 cred = {
                     "apiKey": api_key,
                     "appId": app_id,
                     "projectId": project_id,
+                    "fid": fid,
                     "fcmToken": fcm_token,
                     "gcmToken": gcm_token,
                     "androidId": android_id,
